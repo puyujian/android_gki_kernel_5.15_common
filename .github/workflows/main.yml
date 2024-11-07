@@ -1,59 +1,55 @@
-name: Build Android Kernel 5.15
+name: Android Kernel 5.15 Build with Bazel
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+    push:
+        branches: [ main ]
+    pull_request:
+        branches: [ main ]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+    build:
 
-    steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v2
+        runs-on: ubuntu-latest
 
-    - name: Initialize Variables
-      run: |
-        GKI_ROOT=$(pwd)
-        if test -d "$GKI_ROOT/common/drivers"; then
-          DRIVER_DIR="$GKI_ROOT/common/drivers"
-        elif test -d "$GKI_ROOT/drivers"; then
-          DRIVER_DIR="$GKI_ROOT/drivers"
-        else
-          echo '[ERROR] "drivers/" directory not found.'
-          exit 127
-        fi
-        DRIVER_MAKEFILE=$DRIVER_DIR/Makefile
-        DRIVER_KCONFIG=$DRIVER_DIR/Kconfig
-
-    - name: Setup KernelSU
-      run: |
-        echo "[+] Setting up KernelSU..."
-        test -d "$GKI_ROOT/KernelSU" || git clone https://github.com/tiann/KernelSU "$GKI_ROOT/KernelSU" && echo "[+] Repository cloned."
-        cd "$GKI_ROOT/KernelSU"
-        git stash && echo "[-] Stashed current changes."
-        if [ "$(git status | grep -Po 'v\d+(\.\d+)*' | head -n1)" ]; then
-          git checkout main && echo "[-] Switched to main branch."
-        fi
-        git pull && echo "[+] Repository updated."
-        if [ -z "${{ github.event.inputs.commit-or-tag- }}" ]; then
-          git checkout "$(git describe --abbrev=0 --tags)" && echo "[-] Checked out latest tag."
-        else
-          git checkout "${{ github.event.inputs.commit-or-tag }}" && echo "[-] Checked out ${{ github.event.inputs.commit-or-tag }}." || echo "[-] Checkout default branch"
-        fi
-        cd "$DRIVER_DIR"
-        ln -sf "$(realpath --relative-to="$DRIVER_DIR" "$GKI_ROOT/KernelSU/kernel")" "kernelsu" && echo "[+] Symlink created."
-
-        # Add entries in Makefile and Kconfig if not already existing
-        grep -q "kernelsu" "$DRIVER_MAKEFILE" || printf "\nobj-\$(CONFIG_KSU) += kernelsu/\n" >> "$DRIVER_MAKEFILE" && echo "[+] Modified Makefile."
-        grep -q "source \"drivers/kernelsu/Kconfig\"" "$DRIVER_KCONFIG" || sed -i "/endmenu/i\source \"drivers/kernelsu/Kconfig\"" "$DRIVER_KCONFIG" && echo "[+] Modified Kconfig."
-        echo '[+] Done.'
-
-    - name: Build Kernel
-      run: |
-        # 这里添加你的编译命令
-        make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- O=out
+        steps:
+        - uses: actions/checkout@v2
+        - name: Install dependencies
+            run: |
+                sudo apt-get update
+                sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev gcc-aarch64-linux-gnu bazel
+        - name: Setup environment
+            run: |
+                export ARCH=arm64
+                export SUBARCH=arm64
+                export CROSS_COMPILE=aarch64-linux-gnu-
+        - name: Run setup script
+            run: |
+                curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
+        - name: Configure kernel
+            run: |
+                cd android-kernel-5.15
+                make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
+        - name: Build kernel with Bazel
+            run: |
+                cd android-kernel-5.15
+                bazel build //:android_kernel_5.15 --config=arm64
+        - name: Build modules with Bazel
+            run: |
+                cd android-kernel-5.15
+                bazel build //:modules --config=arm64
+        - name: Install modules
+            run: |
+                cd android-kernel-5.15
+                sudo make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_install
+        - name: Install kernel
+            run: |
+                cd android-kernel-5.15
+                sudo make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- install
+        - name: Install modules
+            run: |
+                cd android-kernel-5.15
+                sudo make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_install
+        - name: Install kernel
+            run: |
+                cd android-kernel-5.15
+                sudo make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- install
